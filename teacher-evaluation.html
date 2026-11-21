@@ -132,7 +132,7 @@ function renderRank(){
   h+=`<div class="card"><h3>${esc(t.name)} – details</h3><div class="mut">${sn} student evaluation(s) this term.</div>`;
   if(!ev.length)h+='<p class="mut">No dean or program head evaluation yet.</p>';
   ev.forEach(e=>{const d=e.details||{};
-   h+=`<div class="sec"><h3>${e.source==='dean'?'Dean':'Program head'} – ${f2(e.score)} <span class="mut">${esc(d.subject||'')} ${esc(d.date||'')}</span> ${isDean()?`<button class="del" onclick="delEval('${e.id}')">Delete</button>`:''}</h3>`;
+   h+=`<div class="sec"><h3>${e.source==='dean'?'Dean':'Program head'}${d.evaluator?' ('+esc(d.evaluator)+')':''} – ${f2(e.score)} <span class="mut">${esc(d.subject||'')} ${esc(d.date||'')}</span> ${isDean()?`<button class="del" onclick="delEval('${e.id}')">Delete</button>`:''}</h3>`;
    if(d.sections)h+=SECTIONS.map((s,i)=>`<div class="ind"><span>${s[0]}</span><b>${f2(d.sections[i])}</b></div>`).join('');
    if(e.remarks)h+=`<p><b>Strengths / remarks:</b> ${esc(e.remarks)}</p>`;h+='</div>'});
   h+='<button class="alt" onclick="window.print()">Print</button></div>';}
@@ -145,13 +145,15 @@ function renderEval(){
  <div><label>Program</label><input id="ep" placeholder="e.g. BSHM"></div>
  <div><label>Course / subject</label><input id="es"></div>
  <div><label>Date</label><input id="ed" type="date"></div>
- <div><label>Evaluated by</label><select id="eb"><option value="dean">Dean</option><option value="program_head">Program head</option></select></div></div>
+ <div><label>Evaluated by</label><select id="eb" onchange="evWho()"><option value="dean">Dean</option><option value="program_head">Program head</option></select></div>
+ <div id="evw" class="hide"><label>Program head (pick from the list)</label><input id="evn" list="tl" placeholder="Type to search"></div></div>
  <p class="mut">Rate each indicator 70–100. Leave blank for N/A. Section totals and the overall rating are computed automatically.</p>`;
  SECTIONS.forEach((s,i)=>{h+=`<div class="sec"><h3>${s[0]} <span class="mut" id="st${i}"></span></h3>`+s[1].map((q,j)=>`<div class="ind"><span>${q}</span><input type="number" min="70" max="100" step="1" data-s="${i}" oninput="calcForm()"></div>`).join('')+'</div>'});
  h+=`<label>Strengths observed / remarks</label><textarea id="er" rows="3" style="width:100%"></textarea>
  <p><b>Overall: <span id="eo">–</span></b></p><button onclick="saveEval()">Save evaluation</button><div id="emsg" class="msg"></div></div>`;
  $('view').innerHTML=h;
 }
+function evWho(){$('evw').classList.toggle('hide',$('eb').value!=='program_head')}
 function calcForm(){
  const secs=SECTIONS.map((_,i)=>avg([...document.querySelectorAll(`input[data-s="${i}"]`)].map(x=>x.value).filter(v=>v!=='').map(Number)));
  secs.forEach((v,i)=>$('st'+i).textContent=v==null?'':'Total: '+f2(v));
@@ -168,8 +170,11 @@ async function saveEval(){
  if(!name||o==null){$('emsg').textContent='Enter a teacher and at least one rating.';return}
  const inputs=[...document.querySelectorAll('input[data-s]')].map(x=>x.value).filter(v=>v!=='').map(Number);
  if(inputs.some(v=>v<70||v>100)){$('emsg').textContent='Ratings must be between 70 and 100.';return}
+ const evn=$('evn').value.trim();
+ if($('eb').value==='program_head'){if(!evn){$('emsg').textContent='Choose the program head who evaluated.';return}
+  if(!teachers.some(x=>x.name.toLowerCase()===evn.toLowerCase())){$('emsg').textContent='Program head must be a name from the teachers list.';return}}
  try{const id=await ensureTeacher(name,$('ep').value.trim());
-  const {error}=await sb.from('evaluations').insert({teacher_id:id,term:$('term').value,source:$('eb').value,score:+o.toFixed(2),remarks:$('er').value,details:{sections:secs,subject:$('es').value,date:$('ed').value}});
+  const {error}=await sb.from('evaluations').insert({teacher_id:id,term:$('term').value,source:$('eb').value,score:+o.toFixed(2),remarks:$('er').value,details:{sections:secs,subject:$('es').value,date:$('ed').value,evaluator:$('eb').value==='program_head'?evn:''}});
   if(error)throw error;$('emsg').textContent='Saved.';await refresh();tab='eval';start2();
  }catch(e){$('emsg').textContent='Could not save: '+e.message}
 }
@@ -207,7 +212,12 @@ function renderTeachers(){
  <div class="card" style="overflow-x:auto"><h3>Teachers (${teachers.length})</h3><table><tr><th>Name</th><th>Program</th><th></th></tr>
  ${teachers.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.program)}</td><td><button class="alt" onclick="editProg('${t.id}')">Edit program</button> <button class="del" onclick="delTeacher('${t.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="3" class="mut">No teachers yet.</td></tr>'}</table></div>`;
 }
-async function importTeachers(fromFile){
+async function importTeachers(f){
+ if(window._imp){$('tm').textContent='Import still running - please wait.';return}
+ window._imp=true;$('tm').textContent='Importing... please wait and do not click again.';
+ try{await _importTeachers(f)}finally{window._imp=false}
+}
+async function _importTeachers(fromFile){
  let text;if(fromFile){const f=$('tf').files[0];if(!f){$('tm').textContent='Choose a CSV file first.';return}text=await f.text()}else text=$('tp').value;
  text=text.replace(/^\uFEFF/,'');if(!text.trim()){$('tm').textContent='Nothing to import.';return}
  let rows=text.includes('\t')?text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split('\t')):parseCsv(text);
