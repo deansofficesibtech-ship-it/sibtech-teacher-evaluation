@@ -146,7 +146,7 @@ function renderEval(){
  <div><label>Course / subject</label><input id="es"></div>
  <div><label>Date</label><input id="ed" type="date"></div>
  <div><label>Evaluated by</label><select id="eb" onchange="evWho()"><option value="dean">Dean</option><option value="program_head">Program head</option></select></div>
- <div id="evw" class="hide"><label>Program head (pick from the list)</label><input id="evn" list="tl" placeholder="Type to search"></div></div>
+ <div id="evw" class="hide"><label>Program head</label><select id="evn"><option value="">-- choose program head --</option>${teachers.filter(t=>/program head/i.test(t.program||'')).map(t=>`<option value="${esc(t.name)}">${esc(t.name)} (${esc(t.program)})</option>`).join('')}</select></div></div>
  <p class="mut">Rate each indicator 70–100. Leave blank for N/A. Section totals and the overall rating are computed automatically.</p>`;
  SECTIONS.forEach((s,i)=>{h+=`<div class="sec"><h3>${s[0]} <span class="mut" id="st${i}"></span></h3>`+s[1].map((q,j)=>`<div class="ind"><span>${q}</span><input type="number" min="70" max="100" step="1" data-s="${i}" oninput="calcForm()"></div>`).join('')+'</div>'});
  h+=`<label>Strengths observed / remarks</label><textarea id="er" rows="3" style="width:100%"></textarea>
@@ -172,7 +172,7 @@ async function saveEval(){
  if(inputs.some(v=>v<70||v>100)){$('emsg').textContent='Ratings must be between 70 and 100.';return}
  const evn=$('evn').value.trim();
  if($('eb').value==='program_head'){if(!evn){$('emsg').textContent='Choose the program head who evaluated.';return}
-  if(!teachers.some(x=>x.name.toLowerCase()===evn.toLowerCase())){$('emsg').textContent='Program head must be a name from the teachers list.';return}}
+}
  try{const id=await ensureTeacher(name,$('ep').value.trim());
   const {error}=await sb.from('evaluations').insert({teacher_id:id,term:$('term').value,source:$('eb').value,score:+o.toFixed(2),remarks:$('er').value,details:{sections:secs,subject:$('es').value,date:$('ed').value,evaluator:$('eb').value==='program_head'?evn:''}});
   if(error)throw error;$('emsg').textContent='Saved.';await refresh();tab='eval';start2();
