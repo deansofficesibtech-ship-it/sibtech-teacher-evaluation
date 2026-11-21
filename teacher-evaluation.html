@@ -73,12 +73,12 @@ async function start(){
  $('login').classList.add('hide');$('app').classList.remove('hide');
  $('who').textContent=me.full_name||me.username;
  if(!isDean())$('ntbtn').classList.add('hide');
- const t=[['rank','Rankings']];if(isDean())t.push(['eval','Evaluate'],['csv','Import student CSV'],['accts','Accounts']);
+ const t=[['rank','Rankings']];if(isDean())t.push(['eval','Evaluate'],['csv','Import student CSV'],['teachers','Teachers'],['accts','Accounts']);
  $('tabs').innerHTML=t.map(x=>`<div class="tab ${tab===x[0]?'on':''}" onclick="tab='${x[0]}';detail=null;start2()">${x[1]}</div>`).join('');
  await loadTerms();
 }
 function start2(){
- const t=[['rank','Rankings']];if(isDean())t.push(['eval','Evaluate'],['csv','Import student CSV'],['accts','Accounts']);
+ const t=[['rank','Rankings']];if(isDean())t.push(['eval','Evaluate'],['csv','Import student CSV'],['teachers','Teachers'],['accts','Accounts']);
  $('tabs').innerHTML=t.map(x=>`<div class="tab ${tab===x[0]?'on':''}" onclick="tab='${x[0]}';detail=null;start2()">${x[1]}</div>`).join('');render();
 }
 async function loadTerms(){
@@ -114,6 +114,7 @@ function render(){
  if(tab==='rank')return renderRank();
  if(tab==='eval')return renderEval();
  if(tab==='csv')return renderCsv();
+ if(tab==='teachers')return renderTeachers();
  if(tab==='accts')return renderAccts();
 }
 function renderRank(){
@@ -196,6 +197,31 @@ async function importCsv(){
   $('cm').textContent=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;await refresh();tab='csv';start2();$('cm').textContent=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;
  }catch(e){$('cm').textContent='Import failed: '+e.message}
 }
+
+function renderTeachers(){
+ $('view').innerHTML=`<div class="card"><h3>Add teachers and programs</h3>
+ <p class="mut">Upload a CSV with columns <b>name</b> and <b>program</b>, or paste rows copied from Excel / Google Sheets (name in the first column, program in the second). Existing teachers just get their program updated.</p>
+ <input type="file" id="tf" accept=".csv"> <button onclick="importTeachers(true)">Import file</button>
+ <label>Or paste here</label><textarea id="tp" rows="6" style="width:100%" placeholder="Jatulan, Mary Joy[TAB]BSHM"></textarea>
+ <p><button onclick="importTeachers(false)">Import pasted rows</button></p><div class="msg" id="tm"></div></div>
+ <div class="card" style="overflow-x:auto"><h3>Teachers (${teachers.length})</h3><table><tr><th>Name</th><th>Program</th><th></th></tr>
+ ${teachers.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.program)}</td><td><button class="alt" onclick="editProg('${t.id}')">Edit program</button> <button class="del" onclick="delTeacher('${t.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="3" class="mut">No teachers yet.</td></tr>'}</table></div>`;
+}
+async function importTeachers(fromFile){
+ let text;if(fromFile){const f=$('tf').files[0];if(!f){$('tm').textContent='Choose a CSV file first.';return}text=await f.text()}else text=$('tp').value;
+ text=text.replace(/^\uFEFF/,'');if(!text.trim()){$('tm').textContent='Nothing to import.';return}
+ let rows=text.includes('\t')?text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split('\t')):parseCsv(text);
+ if(rows.length&&/^(name|teacher|teacher name|faculty)$/i.test((rows[0][0]||'').trim()))rows.shift();
+ const seen={};let add=0,upd=0;
+ try{for(const r of rows){const name=(r[0]||'').trim(),prog=(r[1]||'').trim();if(!name||seen[name.toLowerCase()])continue;seen[name.toLowerCase()]=1;
+   const t=teachers.find(x=>x.name.toLowerCase()===name.toLowerCase());
+   if(t){if(prog&&t.program!==prog){const {error}=await sb.from('teachers').update({program:prog}).eq('id',t.id);if(error)throw error;upd++}}
+   else{const {data,error}=await sb.from('teachers').insert({name,program:prog}).select().single();if(error)throw error;teachers.push(data);add++}}
+  await refresh();tab='teachers';start2();$('tm').textContent=`Added ${add} new teacher(s), updated ${upd}.`;
+ }catch(e){$('tm').textContent='Import failed: '+e.message}
+}
+async function editProg(id){const t=teachers.find(x=>x.id===id);const v=prompt('Program for '+t.name+':',t.program||'');if(v===null)return;await sb.from('teachers').update({program:v.trim()}).eq('id',id);await refresh();tab='teachers';start2()}
+async function delTeacher(id){const t=teachers.find(x=>x.id===id);if(!confirm('Delete '+t.name+' and ALL of their evaluations (every term)?'))return;await sb.from('teachers').delete().eq('id',id);await refresh();tab='teachers';start2()}
 async function renderAccts(){
  const {data}=await sb.from('eval_users').select('*').order('username');
  $('view').innerHTML=`<div class="card"><h3>Create a view-only account</h3><div class="row">
