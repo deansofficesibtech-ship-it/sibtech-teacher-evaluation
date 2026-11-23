@@ -35,7 +35,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v6</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v7</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -66,6 +66,9 @@ const BANDS=[[5,'Excellent','96-100'],[4,'Very Satisfactory','91-95'],[3,'Satisf
 function band(s){if(s>=96)return['Excellent','b-ok',5];if(s>=91)return['Very Satisfactory','b-ok',4];if(s>=86)return['Satisfactory','b-warn',3];if(s>=75)return['Needs Improvement','b-bad',2];return['Unsatisfactory','b-bad',1]}
 // a 1-5 scale entry is converted to the middle of its band; 70-100 is used as is
 function toScore(v){if(isNaN(v))return null;if(v>=70&&v<=100)return v;if(v>=1&&v<=5){const m=[72,80,88,93,98],i=Math.min(Math.floor(v)-1,3),f=v-1-i;return +(m[i]+(m[i+1]-m[i])*f).toFixed(2)}return null}
+// place 1-5 entries inside their band: near the evaluator's own 70-100 ratings that fall in the same band, otherwise at the middle
+function convertAll(vals){const pool=vals.filter(v=>v>=70&&v<=100);const R={5:[96,100],4:[91,95.99],3:[86,90.99],2:[75,85.99],1:[70,74.99]};
+ return vals.map(v=>{if(v>=70)return v;if(Number.isInteger(v)&&R[v]){const pe=pool.filter(x=>x>=R[v][0]&&x<=R[v][1]);if(pe.length)return +avg(pe).toFixed(2)}return toScore(v)})}
 const isDean=()=>me&&me.role==='dean';
 
 async function doLogin(){
@@ -148,6 +151,7 @@ function renderRank(){
    if(d.improve)h+=`<p><b>Areas for improvement:</b> ${esc(d.improve)}</p>`;
    if(d.plan)h+=`<p><b>Recommended action plan / intervention:</b> ${esc(d.plan)}</p>`;
    if(d.comply)h+=`<p><b>Compliance check:</b><br>${COMPLY.map((c,i)=>(d.comply[i]?'&#9745; ':'&#9744; ')+c).join('<br>')}${d.comply_remarks?'<br><i>'+esc(d.comply_remarks)+'</i>':''}</p>`;
+   if(d.estimated)h+=`<p class="mut">* Includes 1–5 entries placed inside their band automatically.</p>`;
    if(d.signed||d.acked)h+=`<p class="mut">Evaluator signed: ${esc(d.signed||'–')} &nbsp; Teacher acknowledgment: ${d.acked?'&#9745; acknowledged '+esc(d.ack_date||''):'&#9744; not yet'}</p>`;
    h+='</div>'});
   h+='<button class="alt" onclick="window.print()">Print</button></div>';}
@@ -162,7 +166,7 @@ function renderEval(){
  <div><label>Date</label><input id="ed" type="date"></div>
  <div><label>Evaluated by</label><select id="eb" onchange="evWho()"><option value="dean">Dean</option><option value="program_head">Program head</option><option value="hr">HR</option></select></div>
  <div id="evw"><label>Program head (choose when Evaluated by = Program head)</label><select id="evn" disabled><option value="">-- choose program head --</option>${teachers.filter(t=>/program head/i.test(t.program||'')).map(t=>`<option value="${esc(t.name)}">${esc(t.name)} (${esc(t.program)})</option>`).join('')}</select></div></div>
- <p class="mut">Rate each indicator 70–100, or use the 1–5 scale (5 = 96–100, 4 = 91–95, 3 = 86–90, 2 = 75–85, 1 = 70–74; a 1–5 entry is converted to the middle of its band). Leave blank for N/A. Section totals, the overall rating and its category are computed automatically.</p>`;
+ <p class="mut">Rate each indicator 70–100, or use the 1–5 scale (5 = 96–100, 4 = 91–95, 3 = 86–90, 2 = 75–85, 1 = 70–74; a 1–5 entry is placed inside its band, close to your other ratings in that band, or at the middle if there are none). Leave blank for N/A. Section totals, the overall rating and its category are computed automatically.</p>`;
  SECTIONS.forEach((s,i)=>{h+=`<div class="sec"><h3>${s[0]} <span class="mut" id="st${i}"></span></h3>`+s[1].map((q,j)=>`<div class="ind"><span>${q}</span><input type="number" min="1" max="100" step="any" data-s="${i}" oninput="calcForm()"></div>`).join('')+'</div>'});
  h+=`<h3 style="margin-top:18px">Part II: Summary of observation</h3>
  <label>Strengths observed</label><textarea id="er" rows="3" style="width:100%"></textarea>
@@ -182,13 +186,18 @@ function renderEval(){
 }
 function evWho(){const on=$('eb').value==='program_head';$('evn').disabled=!on;if(!on)$('evn').value=''}
 function calcForm(){
- const secs=SECTIONS.map((_,i)=>avg([...document.querySelectorAll(`input[data-s="${i}"]`)].map(x=>x.value).filter(v=>v!=='').map(v=>toScore(+v)).filter(v=>v!=null)));
+ const nodes=[...document.querySelectorAll('input[data-s]')];
+ const raw=nodes.map(x=>x.value===''?null:+x.value);
+ const idx=raw.map((v,i)=>v==null?-1:i).filter(i=>i>=0);
+ const conv=convertAll(idx.map(i=>raw[i]));const sc=nodes.map(()=>null);idx.forEach((i,k)=>sc[i]=conv[k]);
+ const secs=SECTIONS.map((_,si)=>avg(nodes.map((n,i)=>+n.dataset.s===si?sc[i]:null).filter(v=>v!=null)));
  secs.forEach((v,i)=>$('st'+i).textContent=v==null?'':'Total: '+f2(v));
  const o=avg(secs.filter(x=>x!=null));
+ const est=idx.some(i=>raw[i]<70);
  const b=o==null?null:band(o);
- $('eo').textContent=o==null?'–':f2(o)+' – '+b[2]+' ('+b[0]+')';
- $('ecat').innerHTML=BANDS.map(x=>`${b&&b[2]===x[0]?'&#9745;':'&#9744;'} ${x[0]} – ${x[1]} (${x[2]})`).join(' &nbsp; ');
- return{secs,o};
+ $('eo').textContent=o==null?'–':f2(o)+' – '+b[2]+' ('+b[0]+')'+(est?' *':'');
+ $('ecat').innerHTML=BANDS.map(x=>`${b&&b[2]===x[0]?'&#9745;':'&#9744;'} ${x[0]} – ${x[1]} (${x[2]})`).join(' &nbsp; ')+(est?'<br>* includes 1–5 entries placed inside their band automatically':'');
+ return{secs,o,est};
 }
 async function ensureTeacher(name,prog){
  name=name.trim();let t=teachers.find(x=>x.name.toLowerCase()===name.toLowerCase());
@@ -197,7 +206,7 @@ async function ensureTeacher(name,prog){
  if(error)throw error;teachers.push(data);return data.id;
 }
 async function saveEval(){
- const name=$('et').value.trim();const {secs,o}=calcForm();
+ const name=$('et').value.trim();const {secs,o,est}=calcForm();
  if(!name||o==null){$('emsg').textContent='Enter a teacher and at least one rating.';return}
  const inputs=[...document.querySelectorAll('input[data-s]')].map(x=>x.value).filter(v=>v!=='').map(Number);
  if(inputs.some(v=>toScore(v)==null)){$('emsg').textContent='Ratings must be 70-100, or 1-5 on the scale.';return}
@@ -205,13 +214,13 @@ async function saveEval(){
  if($('eb').value==='program_head'){if(!evn){$('emsg').textContent='Choose the program head who evaluated.';return}
 }
  try{const id=await ensureTeacher(name,$('ep').value.trim());
-  const {error}=await sb.from('evaluations').insert({teacher_id:id,term:$('term').value,source:$('eb').value,score:+o.toFixed(2),remarks:$('er').value,details:{sections:secs,subject:$('es').value,date:$('ed').value,evaluator:$('eb').value==='program_head'?evn:'',improve:$('ea').value,plan:$('eap').value,comply:COMPLY.map((_,i)=>$('ec'+i).checked),comply_remarks:$('ecr').value,signed:$('esd').value,acked:$('eak').checked,ack_date:$('ead').value}});
+  const {error}=await sb.from('evaluations').insert({teacher_id:id,term:$('term').value,source:$('eb').value,score:+o.toFixed(2),remarks:$('er').value,details:{sections:secs,subject:$('es').value,date:$('ed').value,estimated:est,evaluator:$('eb').value==='program_head'?evn:'',improve:$('ea').value,plan:$('eap').value,comply:COMPLY.map((_,i)=>$('ec'+i).checked),comply_remarks:$('ecr').value,signed:$('esd').value,acked:$('eak').checked,ack_date:$('ead').value}});
   if(error)throw error;$('emsg').textContent='Saved.';await refresh();tab='eval';start2();
  }catch(e){$('emsg').textContent='Could not save: '+e.message}
 }
 function renderCsv(){
  $('view').innerHTML=`<div class="card"><h3>Import student evaluations</h3>
- <p class="mut">CSV with a header row. Required columns: <b>teacher</b> and <b>rating</b> (70–100, or 1–5 on the scale, one row per student; 5 = 96–100, 4 = 91–95, 3 = 86–90, 2 = 75–85, 1 = 70–74). Optional: <b>program</b>. New teachers are created automatically. Rows are added to the selected term (<b>${esc($('term').value)}</b>).</p>
+ <p class="mut">CSV with a header row. Required columns: <b>teacher</b> and <b>rating</b> (70–100, or 1–5 on the scale, one row per student; 5 = 96–100, 4 = 91–95, 3 = 86–90, 2 = 75–85, 1 = 70–74). A 1–5 rating is placed inside its band, close to that teacher's other ratings in the same band, or at the middle if there are none. Optional: <b>program</b>. New teachers are created automatically. Rows are added to the selected term (<b>${esc($('term').value)}</b>).</p>
  <input type="file" id="cf" accept=".csv"> <button onclick="importCsv()">Import</button>
  <div class="msg" id="cm"></div></div>`;
 }
@@ -224,11 +233,12 @@ async function importCsv(){
  const rows=parseCsv((await f.text()).replace(/^\uFEFF/,''));const head=rows.shift().map(x=>x.trim().toLowerCase());
  const ti=head.indexOf('teacher'),ri=head.findIndex(h=>h==='rating'||h==='score'),pi=head.indexOf('program');
  if(ti<0||ri<0){$('cm').textContent='Header must include "teacher" and "rating".';return}
- const out=[];let bad=0;const ids={};
+ const out=[];let bad=0;const groups={};
  try{for(const r of rows){const name=(r[ti]||'').trim(),v=parseFloat(r[ri]);
-   const sc=toScore(v);if(!name||sc==null){bad++;continue}
-   if(!ids[name.toLowerCase()])ids[name.toLowerCase()]=await ensureTeacher(name,pi>=0?(r[pi]||'').trim():'');
-   out.push({teacher_id:ids[name.toLowerCase()],term:$('term').value,source:'student',score:sc})}
+   if(!name||toScore(v)==null){bad++;continue}
+   (groups[name.toLowerCase()]=groups[name.toLowerCase()]||{name,prog:pi>=0?(r[pi]||'').trim():'',vals:[]}).vals.push(v)}
+  for(const k in groups){const g=groups[k];const id=await ensureTeacher(g.name,g.prog);
+   convertAll(g.vals).forEach(sc=>out.push({teacher_id:id,term:$('term').value,source:'student',score:sc}))}
   for(let i=0;i<out.length;i+=500){const {error}=await sb.from('evaluations').insert(out.slice(i,i+500));if(error)throw error}
   $('cm').textContent=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;await refresh();tab='csv';start2();$('cm').textContent=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;
  }catch(e){$('cm').textContent='Import failed: '+e.message}
