@@ -35,7 +35,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v7</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v8</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -181,8 +181,8 @@ function renderEval(){
  <div><label>Teacher acknowledgment</label><label style="color:inherit;font-size:14px;margin:0"><input type="checkbox" id="eak" style="width:auto"> Teacher acknowledged</label></div>
  <div><label>Acknowledged on</label><input id="ead" type="date"></div></div>
  <p><button onclick="saveEval()">Save evaluation</button></p><div id="emsg" class="msg"></div></div>`;
- calcForm();
  $('view').innerHTML=h;
+ calcForm();
 }
 function evWho(){const on=$('eb').value==='program_head';$('evn').disabled=!on;if(!on)$('evn').value=''}
 function calcForm(){
