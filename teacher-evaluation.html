@@ -36,7 +36,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v12</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v13</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -71,6 +71,8 @@ function toScore(v){if(isNaN(v))return null;if(v>=70&&v<=100)return v;if(v>=1&&v
 function convertAll(vals){const pool=vals.filter(v=>v>=70&&v<=100);const R={5:[96,100],4:[91,95.99],3:[86,90.99],2:[75,85.99],1:[70,74.99]};
  return vals.map(v=>{if(v>=70)return v;if(Number.isInteger(v)&&R[v]){const pe=pool.filter(x=>x>=R[v][0]&&x<=R[v][1]);if(pe.length)return +avg(pe).toFixed(2)}return toScore(v)})}
 const isDean=()=>me&&me.role==='dean';
+// Supabase returns at most 1000 rows per request, so read every page
+async function fetchAll(build){let all=[],from=0;for(;;){const {data,error}=await build().range(from,from+999);if(error)throw error;all=all.concat(data||[]);if(!data||data.length<1000)break;from+=1000}return all}
 
 async function doLogin(){
  const {data,error}=await sb.from('eval_users').select('*').eq('username',$('lu').value.trim()).eq('password',$('lp').value).maybeSingle();
@@ -91,7 +93,7 @@ function start2(){
  $('tabs').innerHTML=t.map(x=>`<div class="tab ${tab===x[0]?'on':''}" onclick="tab='${x[0]}';detail=null;start2()">${x[1]}</div>`).join('');render();
 }
 async function loadTerms(){
- const {data}=await sb.from('evaluations').select('term');
+ const data=await fetchAll(()=>sb.from('evaluations').select('term').order('id'));
  let terms=[...new Set((data||[]).map(r=>r.term))].sort().reverse();
  const keep=$('term').value;
  if(!terms.length)terms=['1st Sem 2026-2027'];
@@ -102,8 +104,9 @@ async function loadTerms(){
 function newTerm(){const t=prompt('Term name (e.g. 2nd Sem 2026-2027):');if(!t)return;
  const o=document.createElement('option');o.textContent=t;$('term').prepend(o);$('term').value=t;refresh()}
 async function refresh(){
- const [a,b]=await Promise.all([sb.from('teachers').select('*').order('name'),sb.from('evaluations').select('*').eq('term',$('term').value)]);
- teachers=a.data||[];evals=b.data||[];start2();
+ const term=$('term').value;
+ const [a,b]=await Promise.all([fetchAll(()=>sb.from('teachers').select('*').order('name').order('id')),fetchAll(()=>sb.from('evaluations').select('*').eq('term',term).order('id'))]);
+ teachers=a;evals=b;start2();
 }
 function compute(){
  const rows=teachers.map(t=>{
@@ -241,11 +244,16 @@ function batchesHtml(){const L=batchList();
  ${L.length?'<p><button class="del" onclick="delBatch(\'ALL\')">Delete ALL student ratings for this term</button></p>':''}</div>`}
 async function delBatch(k){
  const L=batchList();const sel=k==='ALL'?L:L.filter(b=>b.k===k);if(!sel.length)return;
- const ids=sel.flatMap(b=>b.ids);
- const what=k==='ALL'?`ALL ${ids.length} student rating(s) for ${$('term').value}`:`${ids.length} student rating(s) from "${sel[0].file}"`;
+ const ids=sel.flatMap(b=>b.ids);const term=$('term').value;
+ const what=k==='ALL'?`ALL ${ids.length} student rating(s) for ${term}`:`${ids.length} student rating(s) from "${sel[0].file}"`;
  if(!confirm(`Delete ${what}?\n\nThis cannot be undone. Teachers and the dean, HR and program head evaluations are not affected.`))return;
- try{for(let i=0;i<ids.length;i+=100){const {error}=await sb.from('evaluations').delete().in('id',ids.slice(i,i+100));if(error)throw error}
-  await refresh();tab='csv';start2();$('cm').textContent=`Deleted ${ids.length} student rating(s).`}
+ $('cm').textContent='Deleting... please wait.';
+ try{let done=0;
+  if(k==='ALL'){const {error,count}=await sb.from('evaluations').delete({count:'exact'}).eq('term',term).eq('source','student');if(error)throw error;done=count??0}
+  else for(let i=0;i<ids.length;i+=100){const {error,count}=await sb.from('evaluations').delete({count:'exact'}).in('id',ids.slice(i,i+100));if(error)throw error;done+=count??0}
+  await refresh();tab='csv';start2();
+  const left=evals.filter(e=>e.source==='student').length;
+  $('cm').textContent=done<ids.length?`Only ${done} of ${ids.length} rating(s) were deleted by the database. ${left} student rating(s) remain - this is usually a Supabase permission setting.`:`Deleted ${done} student rating(s). ${left} student rating(s) remain in this term.`}
  catch(e){alert('Could not delete: '+e.message)}
 }
 function parseCsv(t,D=','){const rows=[];let r=[],c='',q=false;for(let i=0;i<t.length;i++){const ch=t[i];
