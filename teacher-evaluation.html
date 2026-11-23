@@ -28,14 +28,15 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 .sec{border:1px solid var(--line);padding:10px;margin:10px 0;border-radius:4px}.sec h3{margin:0 0 6px;font-size:15px}
 .ind{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:3px 0}.ind input{width:70px}
 #login{max-width:340px;margin:12vh auto}.hide{display:none}.msg{margin:8px 0;font-size:13px}
-@media print{header,.tabs,button{display:none}}
+.po{display:none}.ln{border-bottom:1px solid #888;height:26px}
+@media print{header,.tabs,button,.noprint{display:none!important}.po{display:block}body{background:#fff}.card{border:none;padding:0}.sec{break-inside:avoid;border-color:#999}}
 </style></head><body>
 <div id="login" class="card"><h2>Teacher Evaluation</h2><p class="mut">Dean's Office</p>
 <label>Username</label><input id="lu" style="width:100%"><label>Password</label><input id="lp" type="password" style="width:100%">
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v9</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v10</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -131,8 +132,8 @@ function render(){
 }
 function renderRank(){
  const rows=compute();
- let h=`<div class="card"><div class="mut">Overall = HR 30% + Dean 30% + Program head 30% + Students 10%. Overall below ${NONRENEWAL_MAX+1} (the 75–85 band and lower) is flagged for non-renewal, but only once all four ratings are in; until then the row shows Incomplete and the overall is computed from the ratings available. Click a row for details.</div></div>
- <div class="card" style="overflow-x:auto"><table><tr><th>Rank</th><th>Teacher</th><th>Program</th><th>HR (30%)</th><th>Dean (30%)</th><th>Program head (30%)</th><th>Students (10%)</th><th>Overall</th><th>Rating</th><th>Status</th></tr>`;
+ let h=`<div class="card noprint"><div class="mut">Overall = HR 30% + Dean 30% + Program head 30% + Students 10%. Overall below ${NONRENEWAL_MAX+1} (the 75–85 band and lower) is flagged for non-renewal, but only once all four ratings are in; until then the row shows Incomplete and the overall is computed from the ratings available. Click a row for details.</div></div>
+ <div class="card noprint" style="overflow-x:auto"><table><tr><th>Rank</th><th>Teacher</th><th>Program</th><th>HR (30%)</th><th>Dean (30%)</th><th>Program head (30%)</th><th>Students (10%)</th><th>Overall</th><th>Rating</th><th>Status</th></tr>`;
  if(!rows.length)h+=`<tr><td colspan="11" class="mut">No evaluations for this term yet.${isDean()?' Import a student CSV or add an evaluation.':''}</td></tr>`;
  rows.forEach(r=>{const [lbl,cls,num]=band(r.overall),complete=!r.missing.length,flag=complete&&r.overall<NONRENEWAL_MAX+1;
   h+=`<tr class="click ${flag?'flag':''}" onclick="detail='${r.t.id}';renderRank()"><td>${r.rank}</td><td>${esc(r.t.name)}</td><td>${esc(r.t.program)}</td>
@@ -141,18 +142,21 @@ function renderRank(){
  h+='</table></div>';
  if(detail){const t=teachers.find(x=>x.id===detail);const ev=evals.filter(e=>e.teacher_id===detail&&e.source!=='student');
   const sn=evals.filter(e=>e.teacher_id===detail&&e.source==='student').length;
-  h+=`<div class="card"><h3>${esc(t.name)} – details</h3><div class="mut">${sn} student evaluation(s) this term.</div>`;
+  const rr=rows.find(x=>x.t.id===detail);
+  h+=`<div class="card printarea"><h3>${esc(t.name)} – details</h3><div class="mut noprint">${sn} student evaluation(s) this term.</div>
+  <p class="po">Program: ${esc(t.program||'')} &nbsp; Term: ${esc($('term').value)}</p>
+  ${rr?`<p class="po"><b>Ratings:</b> HR ${f2(rr.h)} &nbsp; Dean ${f2(rr.d)} &nbsp; Program head ${f2(rr.p)} &nbsp; Students ${f2(rr.s)} &nbsp; <b>Overall ${f2(rr.overall)} (${band(rr.overall)[0]})</b></p>`:''}`;
   if(!ev.length)h+='<p class="mut">No HR, dean or program head evaluation yet.</p>';
   ev.forEach(e=>{const d=e.details||{};
    h+=`<div class="sec"><h3>${({dean:'Dean',program_head:'Program head',hr:'HR'})[e.source]}${d.evaluator?' ('+esc(d.evaluator)+')':''} – ${f2(e.score)} <span class="mut">${esc(d.subject||'')} ${esc(d.date||'')}</span> ${isDean()?`<button class="del" onclick="delEval('${e.id}')">Delete</button>`:''}</h3>`;
    if(d.sections)h+=SECTIONS.map((s,i)=>`<div class="ind"><span>${s[0]}</span><b>${f2(d.sections[i])}</b></div>`).join('');
    const bb=band(+e.score);h+=`<div class="ind"><span><b>Overall category</b></span><b>${bb[0]}</b></div>`;
-   if(e.remarks)h+=`<p><b>Strengths observed:</b> ${esc(e.remarks)}</p>`;
-   if(d.improve)h+=`<p><b>Areas for improvement:</b> ${esc(d.improve)}</p>`;
-   if(d.plan)h+=`<p><b>Recommended action plan / intervention:</b> ${esc(d.plan)}</p>`;
-   if(d.comply)h+=`<p><b>Compliance check:</b><br>${COMPLY.map((c,i)=>(d.comply[i]?'&#9745; ':'&#9744; ')+c).join('<br>')}${d.comply_remarks?'<br><i>'+esc(d.comply_remarks)+'</i>':''}</p>`;
-   if(d.estimated)h+=`<p class="mut">* Includes 1–5 entries placed inside their band automatically.</p>`;
-   if(d.signed||d.acked)h+=`<p class="mut">Evaluator signed: ${esc(d.signed||'–')} &nbsp; Teacher acknowledgment: ${d.acked?'&#9745; acknowledged '+esc(d.ack_date||''):'&#9744; not yet'}</p>`;
+   if(e.remarks)h+=`<p class="noprint"><b>Strengths observed:</b> ${esc(e.remarks)}</p>`;
+   const blk=(lbl,txt)=>txt?`<p><b>${lbl}:</b> ${esc(txt)}</p>`:`<div class="po"><b>${lbl}:</b><div class="ln"></div><div class="ln"></div><div class="ln"></div></div>`;
+   h+=blk('Areas for improvement',d.improve)+blk('Recommended action plan / intervention',d.plan);
+   if(d.comply)h+=`<p class="noprint"><b>Compliance check:</b><br>${COMPLY.map((c,i)=>(d.comply[i]?'&#9745; ':'&#9744; ')+c).join('<br>')}${d.comply_remarks?'<br><i>'+esc(d.comply_remarks)+'</i>':''}</p>`;
+   if(d.estimated)h+=`<p class="mut noprint">* Includes 1–5 entries placed inside their band automatically.</p>`;
+   if(d.signed||d.acked)h+=`<p class="mut noprint">Evaluator signed: ${esc(d.signed||'–')} &nbsp; Teacher acknowledgment: ${d.acked?'&#9745; acknowledged '+esc(d.ack_date||''):'&#9744; not yet'}</p>`;
    h+='</div>'});
   h+='<button class="alt" onclick="window.print()">Print</button></div>';}
  $('view').innerHTML=h;
