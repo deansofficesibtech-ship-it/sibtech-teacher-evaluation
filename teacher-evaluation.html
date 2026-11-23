@@ -36,7 +36,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v11</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v12</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -229,7 +229,24 @@ function renderCsv(){
  <p class="mut">Ratings go into the selected term: <b>${esc($('term').value)}</b>.</p>
  <input type="file" id="cf" accept=".csv,.tsv,.txt"> <button onclick="importCsv()">Import</button>
  <label style="color:inherit;font-size:14px"><input type="checkbox" id="cmk" style="width:auto"> Also create teachers that are not in the Teachers list (Google Forms format)</label>
- <div class="msg" id="cm"></div></div>`;
+ <div class="msg" id="cm"></div></div>${batchesHtml()}`;
+}
+function batchList(){const g={};evals.filter(e=>e.source==='student').forEach(e=>{const d=e.details||{};const k=d.batch||'old';
+ const b=g[k]=g[k]||{k,file:d.file||'Uploaded before upload history was kept',at:d.at||'',ids:[],teachers:new Set()};b.ids.push(e.id);b.teachers.add(e.teacher_id)});
+ return Object.values(g).sort((a,b)=>(b.at||'').localeCompare(a.at||''))}
+function batchesHtml(){const L=batchList();
+ return `<div class="card" style="overflow-x:auto"><h3>Student rating uploads for ${esc($('term').value)}</h3>
+ <table><tr><th>Uploaded</th><th>File</th><th>Ratings</th><th>Teachers</th><th></th></tr>
+ ${L.map(b=>`<tr><td>${b.at?esc(new Date(b.at).toLocaleString()):'–'}</td><td>${esc(b.file)}</td><td class="n">${b.ids.length}</td><td class="n">${b.teachers.size}</td><td><button class="del" onclick="delBatch('${b.k}')">Delete this upload</button></td></tr>`).join('')||'<tr><td colspan="5" class="mut">No student ratings uploaded for this term.</td></tr>'}</table>
+ ${L.length?'<p><button class="del" onclick="delBatch(\'ALL\')">Delete ALL student ratings for this term</button></p>':''}</div>`}
+async function delBatch(k){
+ const L=batchList();const sel=k==='ALL'?L:L.filter(b=>b.k===k);if(!sel.length)return;
+ const ids=sel.flatMap(b=>b.ids);
+ const what=k==='ALL'?`ALL ${ids.length} student rating(s) for ${$('term').value}`:`${ids.length} student rating(s) from "${sel[0].file}"`;
+ if(!confirm(`Delete ${what}?\n\nThis cannot be undone. Teachers and the dean, HR and program head evaluations are not affected.`))return;
+ try{for(let i=0;i<ids.length;i+=100){const {error}=await sb.from('evaluations').delete().in('id',ids.slice(i,i+100));if(error)throw error}
+  await refresh();tab='csv';start2();$('cm').textContent=`Deleted ${ids.length} student rating(s).`}
+ catch(e){alert('Could not delete: '+e.message)}
 }
 function parseCsv(t,D=','){const rows=[];let r=[],c='',q=false;for(let i=0;i<t.length;i++){const ch=t[i];
  if(q){if(ch=='"'&&t[i+1]=='"'){c+='"';i++}else if(ch=='"')q=false;else c+=ch}
@@ -240,6 +257,7 @@ async function importCsv(){
  window._impc=true;$('cm').textContent='Importing... please wait and do not click again.';
  try{await _importCsv()}catch(e){$('cm').textContent='Import failed: '+e.message}finally{window._impc=false}
 }
+let curBatch=null;
 const normName=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
 async function maybeReplaceStudents(){
  const n=evals.filter(e=>e.source==='student').length;
@@ -249,6 +267,7 @@ async function maybeReplaceStudents(){
 async function insertBatches(out){for(let i=0;i<out.length;i+=300){const {error}=await sb.from('evaluations').insert(out.slice(i,i+300));if(error)throw error}}
 async function _importCsv(){
  const f=$('cf').files[0];if(!f){$('cm').textContent='Choose a CSV file first.';return}
+ curBatch={batch:Date.now().toString(36),file:f.name,at:new Date().toISOString()};
  let text=(await f.text()).replace(/^\uFEFF/,'');
  const sample=text.slice(0,4000);const D=(sample.split('\t').length>sample.split(',').length)?'\t':',';
  const rows=parseCsv(text,D);const head=rows.shift().map(x=>x.trim().toLowerCase());
@@ -262,7 +281,7 @@ async function _importCsv(){
   (groups[name.toLowerCase()]=groups[name.toLowerCase()]||{name,prog:pi>=0?(r[pi]||'').trim():'',vals:[]}).vals.push(v)}
  await maybeReplaceStudents();
  for(const k in groups){const g=groups[k];const id=await ensureTeacher(g.name,g.prog);
-  convertAll(g.vals).forEach(sc=>out.push({teacher_id:id,term:$('term').value,source:'student',score:sc}))}
+  convertAll(g.vals).forEach(sc=>out.push({teacher_id:id,term:$('term').value,source:'student',score:sc,details:{...curBatch}}))}
  await insertBatches(out);
  const msg=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;
  await refresh();tab='csv';start2();$('cm').textContent=msg;
@@ -288,7 +307,7 @@ async function importWide(rows,hl){
  await maybeReplaceStudents();
  for(const k in byT){const g=byT[k];let t=tmap[k],id;
   if(t)id=t.id;else if(create){id=await ensureTeacher(g.name,'')}else{unmatched.push(`${g.name} (${g.recs.length})`);continue}
-  tcount++;g.recs.forEach(x=>out.push({teacher_id:id,term:$('term').value,source:'student',score:x.score,details:x.details}))}
+  tcount++;g.recs.forEach(x=>out.push({teacher_id:id,term:$('term').value,source:'student',score:x.score,details:{...x.details,...curBatch}}))}
  await insertBatches(out);
  const msg=`Imported ${out.length} rating(s) for ${tcount} teacher(s) from ${responses} student response(s).`+(empty?` ${empty} response(s) had no ratings.`:'')+(unmatched.length?` NOT in your Teachers list, skipped (${unmatched.length}): ${unmatched.slice(0,15).join('; ')}${unmatched.length>15?'; ...':''}. Fix the spelling in the Teachers tab or tick the create box, then import again.`:'');
  await refresh();tab='csv';start2();$('cm').textContent=msg;
