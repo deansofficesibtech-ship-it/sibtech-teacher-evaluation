@@ -35,7 +35,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v8</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v9</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -137,7 +137,7 @@ function renderRank(){
  rows.forEach(r=>{const [lbl,cls,num]=band(r.overall),complete=!r.missing.length,flag=complete&&r.overall<NONRENEWAL_MAX+1;
   h+=`<tr class="click ${flag?'flag':''}" onclick="detail='${r.t.id}';renderRank()"><td>${r.rank}</td><td>${esc(r.t.name)}</td><td>${esc(r.t.program)}</td>
   <td class="n">${f2(r.h)}</td><td class="n">${f2(r.d)}</td><td class="n">${f2(r.p)}</td><td class="n">${f2(r.s)} <span class="mut">(${r.n})</span></td><td class="n"><b>${f2(r.overall)}</b></td>
-  <td><span class="badge ${cls}">${num} – ${lbl}</span></td><td>${!complete?`<span class="badge" style="background:#6b7280">Incomplete</span> <span class="mut">needs ${r.missing.join(', ')}</span>`:flag?'<span class="badge b-bad">For non-renewal</span>':'Retain'}</td></tr>`});
+  <td><span class="badge ${cls}">${lbl}</span></td><td>${!complete?`<span class="badge" style="background:#6b7280">Incomplete</span> <span class="mut">needs ${r.missing.join(', ')}</span>`:flag?'<span class="badge b-bad">For non-renewal</span>':'Retain'}</td></tr>`});
  h+='</table></div>';
  if(detail){const t=teachers.find(x=>x.id===detail);const ev=evals.filter(e=>e.teacher_id===detail&&e.source!=='student');
   const sn=evals.filter(e=>e.teacher_id===detail&&e.source==='student').length;
@@ -146,7 +146,7 @@ function renderRank(){
   ev.forEach(e=>{const d=e.details||{};
    h+=`<div class="sec"><h3>${({dean:'Dean',program_head:'Program head',hr:'HR'})[e.source]}${d.evaluator?' ('+esc(d.evaluator)+')':''} – ${f2(e.score)} <span class="mut">${esc(d.subject||'')} ${esc(d.date||'')}</span> ${isDean()?`<button class="del" onclick="delEval('${e.id}')">Delete</button>`:''}</h3>`;
    if(d.sections)h+=SECTIONS.map((s,i)=>`<div class="ind"><span>${s[0]}</span><b>${f2(d.sections[i])}</b></div>`).join('');
-   const bb=band(+e.score);h+=`<div class="ind"><span><b>Overall category</b></span><b>${bb[2]} – ${bb[0]}</b></div>`;
+   const bb=band(+e.score);h+=`<div class="ind"><span><b>Overall category</b></span><b>${bb[0]}</b></div>`;
    if(e.remarks)h+=`<p><b>Strengths observed:</b> ${esc(e.remarks)}</p>`;
    if(d.improve)h+=`<p><b>Areas for improvement:</b> ${esc(d.improve)}</p>`;
    if(d.plan)h+=`<p><b>Recommended action plan / intervention:</b> ${esc(d.plan)}</p>`;
@@ -195,7 +195,7 @@ function calcForm(){
  const o=avg(secs.filter(x=>x!=null));
  const est=idx.some(i=>raw[i]<70);
  const b=o==null?null:band(o);
- $('eo').textContent=o==null?'–':f2(o)+' – '+b[2]+' ('+b[0]+')'+(est?' *':'');
+ $('eo').textContent=o==null?'–':f2(o)+' ('+b[0]+')'+(est?' *':'');
  $('ecat').innerHTML=BANDS.map(x=>`${b&&b[2]===x[0]?'&#9745;':'&#9744;'} ${x[0]} – ${x[1]} (${x[2]})`).join(' &nbsp; ')+(est?'<br>* includes 1–5 entries placed inside their band automatically':'');
  return{secs,o,est};
 }
