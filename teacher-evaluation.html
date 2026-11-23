@@ -36,7 +36,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v10</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v11</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -224,30 +224,75 @@ async function saveEval(){
 }
 function renderCsv(){
  $('view').innerHTML=`<div class="card"><h3>Import student evaluations</h3>
- <p class="mut">CSV with a header row. Required columns: <b>teacher</b> and <b>rating</b> (70–100, or 1–5 on the scale, one row per student; 5 = 96–100, 4 = 91–95, 3 = 86–90, 2 = 75–85, 1 = 70–74). A 1–5 rating is placed inside its band, close to that teacher's other ratings in the same band, or at the middle if there are none. Optional: <b>program</b>. New teachers are created automatically. Rows are added to the selected term (<b>${esc($('term').value)}</b>).</p>
- <input type="file" id="cf" accept=".csv"> <button onclick="importCsv()">Import</button>
+ <p class="mut"><b>Google Forms export (one row per student, up to 9 teachers per row):</b> upload it as it is. The system reads every "NAME OF TEACHER" block, averages that student's 16 ratings for the teacher (1–5 ratings are converted to the 96–100, 91–95... scale), and adds one student rating per teacher. Teacher names must match your Teachers list.</p>
+ <p class="mut"><b>Simple format:</b> columns <b>teacher</b> and <b>rating</b> (and optional <b>program</b>), one row per student.</p>
+ <p class="mut">Ratings go into the selected term: <b>${esc($('term').value)}</b>.</p>
+ <input type="file" id="cf" accept=".csv,.tsv,.txt"> <button onclick="importCsv()">Import</button>
+ <label style="color:inherit;font-size:14px"><input type="checkbox" id="cmk" style="width:auto"> Also create teachers that are not in the Teachers list (Google Forms format)</label>
  <div class="msg" id="cm"></div></div>`;
 }
-function parseCsv(t){const rows=[];let r=[],c='',q=false;for(let i=0;i<t.length;i++){const ch=t[i];
+function parseCsv(t,D=','){const rows=[];let r=[],c='',q=false;for(let i=0;i<t.length;i++){const ch=t[i];
  if(q){if(ch=='"'&&t[i+1]=='"'){c+='"';i++}else if(ch=='"')q=false;else c+=ch}
- else if(ch=='"')q=true;else if(ch==','){r.push(c);c=''}else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);c='';if(r.some(x=>x.trim()))rows.push(r);r=[]}else c+=ch}
+ else if(ch=='"')q=true;else if(ch==D){r.push(c);c=''}else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);c='';if(r.some(x=>x.trim()))rows.push(r);r=[]}else c+=ch}
  if(c||r.length){r.push(c);rows.push(r)}return rows}
 async function importCsv(){
- const f=$('cf').files[0];if(!f){$('cm').textContent='Choose a CSV file first.';return}
- const rows=parseCsv((await f.text()).replace(/^\uFEFF/,''));const head=rows.shift().map(x=>x.trim().toLowerCase());
- const ti=head.indexOf('teacher'),ri=head.findIndex(h=>h==='rating'||h==='score'),pi=head.indexOf('program');
- if(ti<0||ri<0){$('cm').textContent='Header must include "teacher" and "rating".';return}
- const out=[];let bad=0;const groups={};
- try{for(const r of rows){const name=(r[ti]||'').trim(),v=parseFloat(r[ri]);
-   if(!name||toScore(v)==null){bad++;continue}
-   (groups[name.toLowerCase()]=groups[name.toLowerCase()]||{name,prog:pi>=0?(r[pi]||'').trim():'',vals:[]}).vals.push(v)}
-  for(const k in groups){const g=groups[k];const id=await ensureTeacher(g.name,g.prog);
-   convertAll(g.vals).forEach(sc=>out.push({teacher_id:id,term:$('term').value,source:'student',score:sc}))}
-  for(let i=0;i<out.length;i+=500){const {error}=await sb.from('evaluations').insert(out.slice(i,i+500));if(error)throw error}
-  $('cm').textContent=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;await refresh();tab='csv';start2();$('cm').textContent=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;
- }catch(e){$('cm').textContent='Import failed: '+e.message}
+ if(window._impc){$('cm').textContent='Import still running - please wait.';return}
+ window._impc=true;$('cm').textContent='Importing... please wait and do not click again.';
+ try{await _importCsv()}catch(e){$('cm').textContent='Import failed: '+e.message}finally{window._impc=false}
 }
-
+const normName=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
+async function maybeReplaceStudents(){
+ const n=evals.filter(e=>e.source==='student').length;
+ if(n&&confirm(`This term already has ${n} student rating(s).\n\nOK = replace them with this file (recommended when re-uploading)\nCancel = add this file on top of them`)){
+  const {error}=await sb.from('evaluations').delete().eq('term',$('term').value).eq('source','student');if(error)throw error}
+}
+async function insertBatches(out){for(let i=0;i<out.length;i+=300){const {error}=await sb.from('evaluations').insert(out.slice(i,i+300));if(error)throw error}}
+async function _importCsv(){
+ const f=$('cf').files[0];if(!f){$('cm').textContent='Choose a CSV file first.';return}
+ let text=(await f.text()).replace(/^\uFEFF/,'');
+ const sample=text.slice(0,4000);const D=(sample.split('\t').length>sample.split(',').length)?'\t':',';
+ const rows=parseCsv(text,D);const head=rows.shift().map(x=>x.trim().toLowerCase());
+ const hl=head.map(x=>x.replace(/\s+/g,' '));
+ if(hl.some(h=>h.startsWith('name of teacher')))return importWide(rows,hl);
+ const ti=head.indexOf('teacher'),ri=head.findIndex(h=>h==='rating'||h==='score'),pi=head.indexOf('program');
+ if(ti<0||ri<0){$('cm').textContent='Header must include "teacher" and "rating" (or be a Google Forms export with "NAME OF TEACHER" columns).';return}
+ const out=[];let bad=0;const groups={};
+ for(const r of rows){const name=(r[ti]||'').trim(),v=parseFloat(r[ri]);
+  if(!name||toScore(v)==null){bad++;continue}
+  (groups[name.toLowerCase()]=groups[name.toLowerCase()]||{name,prog:pi>=0?(r[pi]||'').trim():'',vals:[]}).vals.push(v)}
+ await maybeReplaceStudents();
+ for(const k in groups){const g=groups[k];const id=await ensureTeacher(g.name,g.prog);
+  convertAll(g.vals).forEach(sc=>out.push({teacher_id:id,term:$('term').value,source:'student',score:sc}))}
+ await insertBatches(out);
+ const msg=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;
+ await refresh();tab='csv';start2();$('cm').textContent=msg;
+}
+async function importWide(rows,hl){
+ const starts=hl.map((h,i)=>h.startsWith('name of teacher')?i:-1).filter(i=>i>=0);
+ const catOf=h=>/^mastery of the subject matter\s*:/.test(h)?'mastery':/^communication skills\s*:/.test(h)?'communication':/^classroom management\s*:/.test(h)?'classroom':null;
+ const blocks=starts.map((st,k)=>{const end=k+1<starts.length?starts[k+1]:hl.length;const rate=[];let subj=-1,com=-1;
+  for(let i=st+1;i<end;i++){const h=hl[i];if(h.startsWith('subject taught'))subj=i;else if(catOf(h))rate.push([i,catOf(h)]);else if(h.startsWith('comments'))com=i}
+  return{st,subj,rate,com}});
+ const yi=hl.indexOf('year level'),bi=hl.indexOf('block');
+ const avgOf=a=>a.length?+(a.reduce((x,y)=>x+y,0)/a.length).toFixed(2):null;
+ const byT={};let responses=0,empty=0;
+ for(const r of rows){if(!r.some(c=>String(c).trim()))continue;responses++;let any=false;
+  for(const b of blocks){const name=(r[b.st]||'').trim();if(!name)continue;
+   const sc=b.rate.map(([i,c])=>({c,v:toScore(parseFloat(r[i]))})).filter(x=>x.v!=null);if(!sc.length)continue;
+   any=true;const cat=c=>avgOf(sc.filter(x=>x.c===c).map(x=>x.v));
+   const k=normName(name);(byT[k]=byT[k]||{name,recs:[]}).recs.push({score:avgOf(sc.map(x=>x.v)),details:{subject:b.subj>=0?(r[b.subj]||'').trim():'',block:bi>=0?(r[bi]||'').trim():'',year:yi>=0?(r[yi]||'').trim():'',comment:b.com>=0?(r[b.com]||'').trim():'',mastery:cat('mastery'),communication:cat('communication'),classroom:cat('classroom')}})}
+  if(!any)empty++}
+ if(!Object.keys(byT).length){$('cm').textContent='No teacher ratings found in this file.';return}
+ const tmap={};teachers.forEach(t=>tmap[normName(t.name)]=t);
+ const create=$('cmk').checked;const out=[],unmatched=[];let tcount=0;
+ await maybeReplaceStudents();
+ for(const k in byT){const g=byT[k];let t=tmap[k],id;
+  if(t)id=t.id;else if(create){id=await ensureTeacher(g.name,'')}else{unmatched.push(`${g.name} (${g.recs.length})`);continue}
+  tcount++;g.recs.forEach(x=>out.push({teacher_id:id,term:$('term').value,source:'student',score:x.score,details:x.details}))}
+ await insertBatches(out);
+ const msg=`Imported ${out.length} rating(s) for ${tcount} teacher(s) from ${responses} student response(s).`+(empty?` ${empty} response(s) had no ratings.`:'')+(unmatched.length?` NOT in your Teachers list, skipped (${unmatched.length}): ${unmatched.slice(0,15).join('; ')}${unmatched.length>15?'; ...':''}. Fix the spelling in the Teachers tab or tick the create box, then import again.`:'');
+ await refresh();tab='csv';start2();$('cm').textContent=msg;
+}
 function renderTeachers(){
  $('view').innerHTML=`<div class="card"><h3>Add teachers and programs</h3>
  <p class="mut">Upload a CSV with columns <b>name</b> and <b>program</b>, or paste rows copied from Excel / Google Sheets (name in the first column, program in the second). Existing teachers just get their program updated.</p>
