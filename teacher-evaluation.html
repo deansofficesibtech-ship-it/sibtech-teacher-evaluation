@@ -36,7 +36,7 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v14</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v18</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -133,16 +133,30 @@ function render(){
  if(tab==='teachers')return renderTeachers();
  if(tab==='accts')return renderAccts();
 }
-function renderRank(){
- const rows=compute();
- let h=`<div class="card noprint"><div class="mut">Overall = HR 30% + Dean 30% + Program head 30% + Students 10%. Overall below ${NONRENEWAL_MAX+1} (the 75–85 band and lower) is flagged for non-renewal, but only once all four ratings are in; until then the row shows Incomplete and the overall is computed from the ratings available. Click a row for details.</div></div>
- <div class="card noprint" style="overflow-x:auto"><table><tr><th>Rank</th><th>Teacher</th><th>Program</th><th>HR (30%)</th><th>Dean (30%)</th><th>Program head (30%)</th><th>Students (10%)</th><th>Overall</th><th>Rating</th><th>Status</th></tr>`;
- if(!rows.length)h+=`<tr><td colspan="11" class="mut">No evaluations for this term yet.${isDean()?' Import a student CSV or add an evaluation.':''}</td></tr>`;
- rows.forEach(r=>{const [lbl,cls,num]=band(r.overall),complete=!r.missing.length,flag=complete&&r.overall<NONRENEWAL_MAX+1;
-  h+=`<tr class="click ${flag?'flag':''}" onclick="detail='${r.t.id}';renderRank()"><td>${r.rank}</td><td>${esc(r.t.name)}</td><td>${esc(r.t.program)}</td>
+// program heads keep their own program text but are ranked together with ADMIN
+const grpOf=r=>{const p=(r.t.program||'').trim();if(/program head/i.test(p)||p.toUpperCase()==='ADMIN')return 'ADMIN';return p||'No program / category'};
+function assignRanks(rs){let rank=0,prev=null;rs.forEach((r,i)=>{if(prev===null||r.overall.toFixed(2)!==prev){rank=i+1;prev=r.overall.toFixed(2)}r.rank=rank});return rs}
+function rankTable(rs,title){
+ let t=`<div class="card noprint" style="overflow-x:auto">${title?`<h3>${esc(title)} <span class="mut">(${rs.length})</span></h3>`:''}<table><tr><th>Rank</th><th>Teacher</th><th>Program / category</th><th>HR (30%)</th><th>Dean (30%)</th><th>Program head (30%)</th><th>Students (10%)</th><th>Overall</th><th>Rating</th><th>Status</th></tr>`;
+ rs.forEach(r=>{const [lbl,cls]=band(r.overall),complete=!r.missing.length,flag=complete&&r.overall<NONRENEWAL_MAX+1;
+  t+=`<tr class="click ${flag?'flag':''}" onclick="showDetail('${r.t.id}')"><td>${r.rank}</td><td>${esc(r.t.name)}</td><td>${esc(r.t.program)}</td>
   <td class="n">${f2(r.h)}</td><td class="n">${f2(r.d)}</td><td class="n">${f2(r.p)}</td><td class="n">${f2(r.s)} <span class="mut">(${r.n})</span></td><td class="n"><b>${f2(r.overall)}</b></td>
   <td><span class="badge ${cls}">${lbl}</span></td><td>${!complete?`<span class="badge" style="background:#6b7280">Incomplete</span> <span class="mut">needs ${r.missing.join(', ')}</span>`:flag?'<span class="badge b-bad">For non-renewal</span>':'Retain'}</td></tr>`});
- h+='</table></div>';
+ return t+'</table></div>'}
+function showDetail(id){detail=id;renderRank();const el=document.querySelector('.printarea');if(el)el.scrollIntoView({behavior:'smooth'})}
+let rankMode='sep';
+function renderRank(){
+ const rows=compute();
+ const groups=[...new Set(rows.map(grpOf))].sort((a,b)=>a.localeCompare(b));
+ if(rankMode.startsWith('g:')&&!groups.includes(rankMode.slice(2)))rankMode='sep';
+ let h=`<div class="card noprint"><div class="row"><div><label>Ranking view</label><select onchange="rankMode=this.value;detail=null;renderRank()">
+ <option value="sep"${rankMode==='sep'?' selected':''}>Separate ranking for each program / category</option><option value="all"${rankMode==='all'?' selected':''}>All together</option>
+ ${groups.map(g=>`<option value="g:${esc(g)}"${rankMode==='g:'+g?' selected':''}>Only: ${esc(g)}</option>`).join('')}</select></div></div>
+ <div class="mut" style="margin-top:8px">Overall = HR 30% + Dean 30% + Program head 30% + Students 10%. Overall below ${NONRENEWAL_MAX+1} (the 75–85 band and lower) is flagged for non-renewal, but only once all four ratings are in; until then the row shows Incomplete and the overall is computed from the ratings available. Click a row for details.</div></div>`;
+ if(!rows.length)h+=`<div class="card noprint mut">No evaluations for this term yet.${isDean()?' Import a student CSV or add an evaluation.':''}</div>`;
+ else if(rankMode==='all')h+=rankTable(assignRanks(rows.slice()),'');
+ else if(rankMode.startsWith('g:')){const g=rankMode.slice(2);h+=rankTable(assignRanks(rows.filter(r=>grpOf(r)===g)),g)}
+ else groups.forEach(g=>{h+=rankTable(assignRanks(rows.filter(r=>grpOf(r)===g)),g)});
  if(detail){const t=teachers.find(x=>x.id===detail);const ev=evals.filter(e=>e.teacher_id===detail&&e.source!=='student');
   const sn=evals.filter(e=>e.teacher_id===detail&&e.source==='student').length;
   const rr=rows.find(x=>x.t.id===detail);
@@ -170,7 +184,7 @@ async function delEval(id){if(!confirm('Delete this evaluation? You can re-enter
 function renderEval(){
  let h=`<div class="card"><h3>Add HR, dean or program head evaluation</h3>
  <div class="row"><div><label>Teacher</label><input id="et" list="tl" placeholder="Type or pick a name"><datalist id="tl">${teachers.map(t=>`<option value="${esc(t.name)}">`).join('')}</datalist></div>
- <div><label>Program</label><input id="ep" placeholder="e.g. BSHM"></div>
+ <div><label>Program / category</label><input id="ep" placeholder="e.g. BSHM, ADMIN, PART-TIME FACULTY"></div>
  <div><label>Course / subject</label><input id="es"></div>
  <div><label>Date</label><input id="ed" type="date"></div>
  <div><label>Evaluated by</label><select id="eb" onchange="evWho()"><option value="dean">Dean</option><option value="program_head">Program head</option><option value="hr">HR</option></select></div>
@@ -209,7 +223,7 @@ function calcForm(){
  return{secs,o,est};
 }
 async function ensureTeacher(name,prog){
- name=name.trim();let t=teachers.find(x=>x.name.toLowerCase()===name.toLowerCase());
+ name=name.trim();const mm=matchTeacher(name,tlist());let t=mm.auto?mm.t:null;
  if(t){if(prog&&!t.program){await sb.from('teachers').update({program:prog}).eq('id',t.id)}return t.id}
  const {data,error}=await sb.from('teachers').insert({name,program:prog||''}).select().single();
  if(error)throw error;teachers.push(data);return data.id;
@@ -274,6 +288,25 @@ const normName=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').
 const SKIPTOK=['JR','SR','MR','MRS','MS','DR','ENGR','PROF','III'];
 const nameTokens=x=>normName(x).split(' ').filter(t=>t.length>1&&!SKIPTOK.includes(t));
 function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+const tlist=()=>teachers.map(t=>({t,n:normName(t.name),tok:nameTokens(t.name),tk:nameTokens(t.name).sort().join(' ')}));
+function nameSim(a,b){const an=normName(a),bn=normName(b);if(an===bn)return 1;const at=nameTokens(a),bt=nameTokens(b);
+ if(at.length&&[...at].sort().join(' ')===[...bt].sort().join(' '))return 1;
+ const A=new Set(at),B=new Set(bt);const inter=[...A].filter(z=>B.has(z)).length;let sc=inter/Math.max(A.size,B.size,1);
+ if(inter>=2&&(inter===A.size||inter===B.size))sc=Math.max(sc,0.9);
+ return Math.max(sc,1-lev(an,bn)/Math.max(an.length,bn.length,1))}
+function dupPairs(){const out=[];for(let i=0;i<teachers.length;i++)for(let j=i+1;j<teachers.length;j++){const sc=nameSim(teachers[i].name,teachers[j].name);if(sc>=0.8)out.push([teachers[i],teachers[j],sc])}return out.sort((x,y)=>y[2]-x[2])}
+async function mergeTeachers(keep,drop){
+ if(!keep||!drop||keep===drop){alert('Choose two different teachers.');return}
+ const K=teachers.find(x=>x.id===keep),D=teachers.find(x=>x.id===drop);
+ if(!confirm(`Merge "${D.name}" into "${K.name}"?\n\nAll ratings and evaluations of "${D.name}" (every term) move to "${K.name}", then "${D.name}" is removed from the list. This cannot be undone.`))return;
+ try{let r=await sb.from('evaluations').update({teacher_id:keep}).eq('teacher_id',drop);if(r.error)throw r.error;
+  r=await sb.from('evaluations').select('id',{count:'exact',head:true}).eq('teacher_id',drop);if(r.error)throw r.error;
+  if(r.count>0)throw new Error(r.count+' rating(s) could not be moved, so nothing was deleted');
+  if(!K.program&&D.program){r=await sb.from('teachers').update({program:D.program}).eq('id',keep);if(r.error)throw r.error}
+  r=await sb.from('teachers').delete().eq('id',drop);if(r.error)throw r.error;
+  await refresh();tab='teachers';start2();$('tm').textContent=`Merged "${D.name}" into "${K.name}".`
+ }catch(e){alert('Could not merge: '+e.message)}
+}
 // find the already-listed teacher a name belongs to
 function matchTeacher(raw,tl){
  const n=normName(raw),tok=nameTokens(raw),tk=[...tok].sort().join(' ');
@@ -359,13 +392,24 @@ async function runImport(){
  if(stats.badCells)msg+=` ${stats.badCells} rating cell(s) could not be read (for example: ${[...stats.samples].map(x=>'"'+x+'"').join(', ')}).`;
  pending=null;await refresh();tab='csv';start2();$('cm').textContent=msg;
 }
+function dupHtml(){
+ const P=dupPairs();const cnt=id=>evals.filter(e=>e.teacher_id===id).length;
+ const lab=t=>`${esc(t.name)} <span class="mut">${esc(t.program||'no program')} · ${cnt(t.id)} rating(s) this term</span>`;
+ const opts=teachers.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(t=>`<option value="${t.id}">${esc(t.name)}${t.program?' ('+esc(t.program)+')':''}</option>`).join('');
+ return `<div class="card" style="overflow-x:auto"><h3>Possible duplicate teachers (${P.length})</h3>
+ <p class="mut">Names that look like the same person. Merging moves all of the removed teacher's ratings and evaluations (every term) to the one you keep. Keep the entry that has the correct program, for example the one marked PROGRAM HEAD.</p>
+ ${P.length?`<table><tr><th>Teacher A</th><th>Teacher B</th><th></th></tr>${P.slice(0,40).map(x=>`<tr><td>${lab(x[0])}</td><td>${lab(x[1])}</td><td style="white-space:nowrap"><button class="alt" onclick="mergeTeachers('${x[0].id}','${x[1].id}')">Keep A, merge B into it</button> <button class="alt" onclick="mergeTeachers('${x[1].id}','${x[0].id}')">Keep B, merge A into it</button></td></tr>`).join('')}</table>`:'<p class="mut">No similar names found.</p>'}
+ <h3 style="margin-top:16px">Merge two teachers yourself</h3><div class="row">
+ <div><label>Merge this teacher (will be removed)</label><select id="mg1" style="max-width:320px"><option value="">-- choose --</option>${opts}</select></div>
+ <div><label>into this teacher (kept)</label><select id="mg2" style="max-width:320px"><option value="">-- choose --</option>${opts}</select></div>
+ <button onclick="mergeTeachers($('mg2').value,$('mg1').value)">Merge</button></div></div>`}
 function renderTeachers(){
- $('view').innerHTML=`<div class="card"><h3>Add teachers and programs</h3>
+ $('view').innerHTML=dupHtml()+`<div class="card"><h3>Add teachers and programs</h3>
  <p class="mut">Upload a CSV with columns <b>name</b> and <b>program</b>, or paste rows copied from Excel / Google Sheets (name in the first column, program in the second). Existing teachers just get their program updated.</p>
  <input type="file" id="tf" accept=".csv"> <button onclick="importTeachers(true)">Import file</button>
  <label>Or paste here</label><textarea id="tp" rows="6" style="width:100%" placeholder="Jatulan, Mary Joy[TAB]BSHM"></textarea>
  <p><button onclick="importTeachers(false)">Import pasted rows</button></p><div class="msg" id="tm"></div></div>
- <div class="card" style="overflow-x:auto"><h3>Teachers (${teachers.length})</h3><table><tr><th>Name</th><th>Program</th><th></th></tr>
+ <div class="card" style="overflow-x:auto"><h3>Teachers (${teachers.length})</h3><table><tr><th>Name</th><th>Program / category</th><th></th></tr>
  ${teachers.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.program)}</td><td><button class="alt" onclick="editProg('${t.id}')">Edit program</button> <button class="del" onclick="delTeacher('${t.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="3" class="mut">No teachers yet.</td></tr>'}</table></div>`;
 }
 async function importTeachers(f){
@@ -380,7 +424,7 @@ async function _importTeachers(fromFile){
  if(rows.length&&/^(name|teacher|teacher name|faculty)$/i.test((rows[0][0]||'').trim()))rows.shift();
  const seen={};let add=0,upd=0;
  try{for(const r of rows){const name=(r[0]||'').trim(),prog=(r[1]||'').trim();if(!name||seen[name.toLowerCase()])continue;seen[name.toLowerCase()]=1;
-   const t=teachers.find(x=>x.name.toLowerCase()===name.toLowerCase());
+   const mm=matchTeacher(name,tlist());const t=mm.auto?mm.t:null;
    if(t){if(prog&&t.program!==prog){const {error}=await sb.from('teachers').update({program:prog}).eq('id',t.id);if(error)throw error;upd++}}
    else{const {data,error}=await sb.from('teachers').insert({name,program:prog}).select().single();if(error)throw error;teachers.push(data);add++}}
   await refresh();tab='teachers';start2();$('tm').textContent=`Added ${add} new teacher(s), updated ${upd}.`;
