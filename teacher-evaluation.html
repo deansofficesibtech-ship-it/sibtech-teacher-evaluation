@@ -29,14 +29,14 @@ label{display:block;font-size:13px;color:var(--mut);margin:8px 0 2px}
 .ind{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:3px 0}.ind input{width:70px}
 #login{max-width:340px;margin:12vh auto}.hide{display:none}.msg{margin:8px 0;font-size:13px}
 .po{display:none}.ln{border-bottom:1px solid #888;height:26px}
-@media print{header,.tabs,button,.noprint{display:none!important}.po{display:block}body{background:#fff}.card{border:none;padding:0}.sec{break-inside:avoid;border-color:#999}}
+@media print{.sc{display:none!important}body.pc .sc{display:block!important}.scl{max-height:none!important;overflow:visible!important}header,.tabs,button,.noprint{display:none!important}.po{display:block}body{background:#fff}.card{border:none;padding:0}.sec{break-inside:avoid;border-color:#999}}
 </style></head><body>
 <div id="login" class="card"><h2>Teacher Evaluation</h2><p class="mut">Dean's Office</p>
 <label>Username</label><input id="lu" style="width:100%"><label>Password</label><input id="lp" type="password" style="width:100%">
 <p><button onclick="doLogin()">Sign in</button></p><div id="lmsg" class="msg" style="color:var(--bad)"></div></div>
 
 <div id="app" class="hide">
-<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v13</small></h1>
+<header><h1>Teacher Evaluation <small style="font-weight:400;opacity:.7">v14</small></h1>
 <div class="row" style="align-items:center"><span id="who"></span>
 <select id="term" onchange="refresh()"></select>
 <button class="alt" onclick="newTerm()" id="ntbtn">New term</button>
@@ -161,7 +161,9 @@ function renderRank(){
    if(d.estimated)h+=`<p class="mut noprint">* Includes 1–5 entries placed inside their band automatically.</p>`;
    if(d.signed||d.acked)h+=`<p class="mut noprint">Evaluator signed: ${esc(d.signed||'–')} &nbsp; Teacher acknowledgment: ${d.acked?'&#9745; acknowledged '+esc(d.ack_date||''):'&#9744; not yet'}</p>`;
    h+='</div>'});
-  h+='<button class="alt" onclick="window.print()">Print</button></div>';}
+  const scm=evals.filter(e=>e.teacher_id===detail&&e.source==='student'&&e.details&&String(e.details.comment||'').trim());
+  if(sn)h+=`<div class="sec sc"><h3>Student comments and suggestions (${scm.length} of ${sn} students wrote one)</h3><div class="scl" style="max-height:420px;overflow:auto">${scm.length?scm.map(e=>{const d=e.details;return `<p style="margin:6px 0">&bull; ${esc(d.comment)} <span class="mut">${[d.subject,d.block,d.year,'rated '+f2(e.score)].filter(Boolean).map(esc).join(' · ')}</span></p>`}).join(''):'<p class="mut">No comments were written.</p>'}</div></div>`;
+  h+=`<label class="noprint" style="color:inherit;font-size:14px"><input type="checkbox" style="width:auto" ${document.body.classList.contains('pc')?'checked':''} onchange="document.body.classList.toggle('pc',this.checked)"> Include student comments when printing</label><p><button class="alt" onclick="window.print()">Print</button></p></div>`;}
  $('view').innerHTML=h;
 }
 async function delEval(id){if(!confirm('Delete this evaluation? You can re-enter it afterwards.'))return;await sb.from('evaluations').delete().eq('id',id);refresh()}
@@ -227,12 +229,12 @@ async function saveEval(){
 }
 function renderCsv(){
  $('view').innerHTML=`<div class="card"><h3>Import student evaluations</h3>
- <p class="mut"><b>Google Forms export (one row per student, up to 9 teachers per row):</b> upload it as it is. The system reads every "NAME OF TEACHER" block, averages that student's 16 ratings for the teacher (1–5 ratings are converted to the 96–100, 91–95... scale), and adds one student rating per teacher. Teacher names must match your Teachers list.</p>
+ <p class="mut"><b>Google Forms export (one row per student, up to 9 teachers per row):</b> upload it as it is. The system reads every "NAME OF TEACHER" block, averages that student's 16 ratings for the teacher (1–5 ratings are converted to the 96–100, 91–95... scale), and adds one student rating per teacher. Names already in your Teachers list are matched automatically, even when written slightly differently (order, initials, accents). Any name that is not an exact match is shown to you first, so no teacher is duplicated and no rating is left out.</p>
  <p class="mut"><b>Simple format:</b> columns <b>teacher</b> and <b>rating</b> (and optional <b>program</b>), one row per student.</p>
  <p class="mut">Ratings go into the selected term: <b>${esc($('term').value)}</b>.</p>
  <input type="file" id="cf" accept=".csv,.tsv,.txt"> <button onclick="importCsv()">Import</button>
- <label style="color:inherit;font-size:14px"><input type="checkbox" id="cmk" style="width:auto"> Also create teachers that are not in the Teachers list (Google Forms format)</label>
- <div class="msg" id="cm"></div></div>${batchesHtml()}`;
+ 
+ <div class="msg" id="cm"></div><div id="rv" style="overflow-x:auto"></div></div>${batchesHtml()}`;
 }
 function batchList(){const g={};evals.filter(e=>e.source==='student').forEach(e=>{const d=e.details||{};const k=d.batch||'old';
  const b=g[k]=g[k]||{k,file:d.file||'Uploaded before upload history was kept',at:d.at||'',ids:[],teachers:new Set()};b.ids.push(e.id);b.teachers.add(e.teacher_id)});
@@ -262,11 +264,27 @@ function parseCsv(t,D=','){const rows=[];let r=[],c='',q=false;for(let i=0;i<t.l
  if(c||r.length){r.push(c);rows.push(r)}return rows}
 async function importCsv(){
  if(window._impc){$('cm').textContent='Import still running - please wait.';return}
- window._impc=true;$('cm').textContent='Importing... please wait and do not click again.';
+ window._impc=true;$('cm').textContent='Reading file... please wait.';if($('rv'))$('rv').innerHTML='';
  try{await _importCsv()}catch(e){$('cm').textContent='Import failed: '+e.message}finally{window._impc=false}
 }
-let curBatch=null;
-const normName=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
+let curBatch=null,pending=null;
+const RWORDS={'excellent':5,'outstanding':5,'strongly agree':5,'always':5,'very satisfactory':4,'very good':4,'agree':4,'often':4,'satisfactory':3,'good':3,'neutral':3,'sometimes':3,'fair':2,'needs improvement':2,'disagree':2,'rarely':2,'poor':1,'unsatisfactory':1,'strongly disagree':1,'never':1};
+function parseRating(x){const t=String(x??'').trim();if(!t)return NaN;const n=parseFloat(t);if(!isNaN(n))return n;const w=RWORDS[t.toLowerCase().replace(/[^a-z ]/g,'').trim()];return w===undefined?NaN:w}
+const normName=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim();
+const SKIPTOK=['JR','SR','MR','MRS','MS','DR','ENGR','PROF','III'];
+const nameTokens=x=>normName(x).split(' ').filter(t=>t.length>1&&!SKIPTOK.includes(t));
+function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+// find the already-listed teacher a name belongs to
+function matchTeacher(raw,tl){
+ const n=normName(raw),tok=nameTokens(raw),tk=[...tok].sort().join(' ');
+ let m=tl.filter(x=>x.n===n);if(m.length===1)return{t:m[0].t,auto:true};if(m.length>1)return{t:m[0].t,auto:false,score:1};
+ m=tl.filter(x=>x.tk===tk&&tk);if(m.length===1)return{t:m[0].t,auto:true};if(m.length>1)return{t:m[0].t,auto:false,score:1};
+ let best=null,bs=0;
+ for(const x of tl){const a=new Set(tok),b=new Set(x.tok);const inter=[...a].filter(z=>b.has(z)).length;let sc=inter/Math.max(a.size,b.size,1);
+  if(inter>=2&&(inter===a.size||inter===b.size))sc=Math.max(sc,0.9);
+  sc=Math.max(sc,1-lev(n,x.n)/Math.max(n.length,x.n.length,1));if(sc>bs){bs=sc;best=x}}
+ return bs>=0.75?{t:best.t,auto:false,score:bs}:{t:null,auto:false,hint:bs>=0.5?best.t:null,score:bs}
+}
 async function maybeReplaceStudents(){
  const n=evals.filter(e=>e.source==='student').length;
  if(n&&confirm(`This term already has ${n} student rating(s).\n\nOK = replace them with this file (recommended when re-uploading)\nCancel = add this file on top of them`)){
@@ -280,45 +298,66 @@ async function _importCsv(){
  const sample=text.slice(0,4000);const D=(sample.split('\t').length>sample.split(',').length)?'\t':',';
  const rows=parseCsv(text,D);const head=rows.shift().map(x=>x.trim().toLowerCase());
  const hl=head.map(x=>x.replace(/\s+/g,' '));
- if(hl.some(h=>h.startsWith('name of teacher')))return importWide(rows,hl);
- const ti=head.indexOf('teacher'),ri=head.findIndex(h=>h==='rating'||h==='score'),pi=head.indexOf('program');
- if(ti<0||ri<0){$('cm').textContent='Header must include "teacher" and "rating" (or be a Google Forms export with "NAME OF TEACHER" columns).';return}
- const out=[];let bad=0;const groups={};
- for(const r of rows){const name=(r[ti]||'').trim(),v=parseFloat(r[ri]);
-  if(!name||toScore(v)==null){bad++;continue}
-  (groups[name.toLowerCase()]=groups[name.toLowerCase()]||{name,prog:pi>=0?(r[pi]||'').trim():'',vals:[]}).vals.push(v)}
- await maybeReplaceStudents();
- for(const k in groups){const g=groups[k];const id=await ensureTeacher(g.name,g.prog);
-  convertAll(g.vals).forEach(sc=>out.push({teacher_id:id,term:$('term').value,source:'student',score:sc,details:{...curBatch}}))}
- await insertBatches(out);
- const msg=`Imported ${out.length} student rating(s). Skipped ${bad} invalid row(s).`;
- await refresh();tab='csv';start2();$('cm').textContent=msg;
-}
-async function importWide(rows,hl){
- const starts=hl.map((h,i)=>h.startsWith('name of teacher')?i:-1).filter(i=>i>=0);
- const catOf=h=>/^mastery of the subject matter\s*:/.test(h)?'mastery':/^communication skills\s*:/.test(h)?'communication':/^classroom management\s*:/.test(h)?'classroom':null;
- const blocks=starts.map((st,k)=>{const end=k+1<starts.length?starts[k+1]:hl.length;const rate=[];let subj=-1,com=-1;
-  for(let i=st+1;i<end;i++){const h=hl[i];if(h.startsWith('subject taught'))subj=i;else if(catOf(h))rate.push([i,catOf(h)]);else if(h.startsWith('comments'))com=i}
-  return{st,subj,rate,com}});
- const yi=hl.indexOf('year level'),bi=hl.indexOf('block');
- const avgOf=a=>a.length?+(a.reduce((x,y)=>x+y,0)/a.length).toFixed(2):null;
- const byT={};let responses=0,empty=0;
- for(const r of rows){if(!r.some(c=>String(c).trim()))continue;responses++;let any=false;
-  for(const b of blocks){const name=(r[b.st]||'').trim();if(!name)continue;
-   const sc=b.rate.map(([i,c])=>({c,v:toScore(parseFloat(r[i]))})).filter(x=>x.v!=null);if(!sc.length)continue;
-   any=true;const cat=c=>avgOf(sc.filter(x=>x.c===c).map(x=>x.v));
-   const k=normName(name);(byT[k]=byT[k]||{name,recs:[]}).recs.push({score:avgOf(sc.map(x=>x.v)),details:{subject:b.subj>=0?(r[b.subj]||'').trim():'',block:bi>=0?(r[bi]||'').trim():'',year:yi>=0?(r[yi]||'').trim():'',comment:b.com>=0?(r[b.com]||'').trim():'',mastery:cat('mastery'),communication:cat('communication'),classroom:cat('classroom')}})}
-  if(!any)empty++}
+ const byT={};const stats={responses:0,found:0,unreadable:0,badCells:0,samples:new Set()};
+ if(hl.some(h=>h.startsWith('name of teacher'))){
+  const starts=hl.map((h,i)=>h.startsWith('name of teacher')?i:-1).filter(i=>i>=0);
+  const catOf=h=>/^mastery of the subject matter\s*:/.test(h)?'mastery':/^communication skills\s*:/.test(h)?'communication':/^classroom management\s*:/.test(h)?'classroom':null;
+  const blocks=starts.map((st,k)=>{const end=k+1<starts.length?starts[k+1]:hl.length;const rate=[];let subj=-1,com=-1;
+   for(let i=st+1;i<end;i++){const h=hl[i];if(h.startsWith('subject taught'))subj=i;else if(catOf(h))rate.push([i,catOf(h)]);else if(h.startsWith('comments'))com=i}
+   return{st,subj,rate,com}});
+  const yi=hl.indexOf('year level'),bi=hl.indexOf('block');
+  const avgOf=a=>a.length?+(a.reduce((x,y)=>x+y,0)/a.length).toFixed(2):null;
+  for(const r of rows){if(!r.some(c=>String(c).trim()))continue;stats.responses++;
+   for(const b of blocks){const name=(r[b.st]||'').trim();if(!name)continue;
+    const sc=[];b.rate.forEach(([i,c])=>{const raw=String(r[i]??'').trim();if(!raw)return;const v=toScore(parseRating(raw));if(v==null){stats.badCells++;if(stats.samples.size<6)stats.samples.add(raw)}else sc.push({c,v})});
+    const k=normName(name);(byT[k]=byT[k]||{name,prog:'',recs:[]});
+    if(!sc.length){stats.unreadable++;byT[k].noscore=(byT[k].noscore||0)+1;continue}
+    const cat=c=>avgOf(sc.filter(x=>x.c===c).map(x=>x.v));stats.found++;
+    byT[k].recs.push({score:avgOf(sc.map(x=>x.v)),details:{subject:b.subj>=0?(r[b.subj]||'').trim():'',block:bi>=0?(r[bi]||'').trim():'',year:yi>=0?(r[yi]||'').trim():'',comment:b.com>=0?(r[b.com]||'').trim():'',mastery:cat('mastery'),communication:cat('communication'),classroom:cat('classroom')}})}}
+ }else{
+  const ti=head.indexOf('teacher'),ri=head.findIndex(h=>h==='rating'||h==='score'),pi=head.indexOf('program');
+  if(ti<0||ri<0){$('cm').textContent='Header must include "teacher" and "rating" (or be a Google Forms export with "NAME OF TEACHER" columns).';return}
+  const groups={};
+  for(const r of rows){if(!r.some(c=>String(c).trim()))continue;stats.responses++;const name=(r[ti]||'').trim(),v=parseRating(r[ri]);
+   if(!name)continue;if(toScore(v)==null){stats.unreadable++;stats.badCells++;if(stats.samples.size<6)stats.samples.add(String(r[ri]));continue}
+   const k=normName(name);(groups[k]=groups[k]||{name,prog:pi>=0?(r[pi]||'').trim():'',vals:[]}).vals.push(v)}
+  for(const k in groups){const g=groups[k];byT[k]={name:g.name,prog:g.prog,recs:convertAll(g.vals).map(sc=>({score:sc,details:{}}))};stats.found+=g.vals.length}
+ }
  if(!Object.keys(byT).length){$('cm').textContent='No teacher ratings found in this file.';return}
- const tmap={};teachers.forEach(t=>tmap[normName(t.name)]=t);
- const create=$('cmk').checked;const out=[],unmatched=[];let tcount=0;
+ const tl=teachers.map(t=>({t,n:normName(t.name),tok:nameTokens(t.name),tk:nameTokens(t.name).sort().join(' ')}));
+ const map={},review=[];
+ for(const k in byT){const m=matchTeacher(byT[k].name,tl);if(m.auto)map[k]=m.t.id;else review.push({k,m})}
+ pending={byT,stats,map,review};
+ if(!review.length)return runImport();
+ const opts=teachers.slice().sort((a,b)=>a.name.localeCompare(b.name));
+ $('cm').textContent=`${Object.keys(byT).length-review.length} teacher name(s) matched your list automatically. Please check the ${review.length} below so no teacher is duplicated and no rating is left out.`;
+ $('rv').innerHTML=`<table><tr><th>Name in the file</th><th>Ratings</th><th>Use this teacher</th></tr>${review.map((x,i)=>{const g=byT[x.k],m=x.m,sug=m.t||null;
+  return `<tr><td>${esc(g.name)}<div class="mut">${m.t?'looks like '+esc(m.t.name)+' ('+Math.round(m.score*100)+'% similar)':m.hint?'closest: '+esc(m.hint.name):'no similar name in your list'}</div></td><td class="n">${g.recs.length}</td>
+  <td><select id="mp${i}" style="max-width:340px">${sug?`<option value="T:${sug.id}" selected>${esc(sug.name)} (suggested)</option>`:''}<option value="NEW"${sug?'':' selected'}>Create as a new teacher</option><option value="SKIP">Skip these ratings</option>${opts.filter(t=>!sug||t.id!==sug.id).map(t=>`<option value="T:${t.id}">${esc(t.name)}</option>`).join('')}</select></td></tr>`}).join('')}</table>
+  <p><button onclick="confirmMap()">Confirm and import</button></p>`;
+}
+async function confirmMap(){
+ if(window._impc2||!pending)return;window._impc2=true;
+ try{$('cm').textContent='Importing... please wait and do not click again.';
+  pending.review.forEach((x,i)=>{const v=$('mp'+i).value;pending.map[x.k]=v==='NEW'?'NEW':v==='SKIP'?null:v.slice(2)});
+  await runImport()}catch(e){$('cm').textContent='Import failed: '+e.message}finally{window._impc2=false}
+}
+async function runImport(){
+ const {byT,stats,map}=pending;const term=$('term').value;
  await maybeReplaceStudents();
- for(const k in byT){const g=byT[k];let t=tmap[k],id;
-  if(t)id=t.id;else if(create){id=await ensureTeacher(g.name,'')}else{unmatched.push(`${g.name} (${g.recs.length})`);continue}
-  tcount++;g.recs.forEach(x=>out.push({teacher_id:id,term:$('term').value,source:'student',score:x.score,details:{...x.details,...curBatch}}))}
+ const out=[];const tids=new Set();let skipped=0,created=0;
+ for(const k in byT){const g=byT[k];let id=map[k];
+  if(id==null){skipped+=g.recs.length;continue}
+  if(id==='NEW'){const before=teachers.length;id=await ensureTeacher(g.name,g.prog);if(teachers.length>before)created++}
+  tids.add(id);g.recs.forEach(x=>out.push({teacher_id:id,term,source:'student',score:x.score,details:{...x.details,...curBatch}}))}
  await insertBatches(out);
- const msg=`Imported ${out.length} rating(s) for ${tcount} teacher(s) from ${responses} student response(s).`+(empty?` ${empty} response(s) had no ratings.`:'')+(unmatched.length?` NOT in your Teachers list, skipped (${unmatched.length}): ${unmatched.slice(0,15).join('; ')}${unmatched.length>15?'; ...':''}. Fix the spelling in the Teachers tab or tick the create box, then import again.`:'');
- await refresh();tab='csv';start2();$('cm').textContent=msg;
+ const comments=out.filter(x=>String(x.details.comment||'').trim()).length;
+ let msg=`Imported ${out.length} rating(s) from ${stats.responses} response(s) for ${tids.size} teacher(s), with ${comments} comment(s).`;
+ if(created)msg+=` ${created} new teacher(s) created.`;
+ if(skipped)msg+=` ${skipped} rating(s) skipped because you chose Skip.`;
+ if(stats.unreadable){const nm=Object.values(byT).filter(g=>g.noscore).map(g=>`${g.name} (${g.noscore})`);msg+=` ${stats.unreadable} teacher block(s) had no readable ratings${nm.length?': '+nm.slice(0,10).join('; ')+(nm.length>10?'; ...':''):''}.`}
+ if(stats.badCells)msg+=` ${stats.badCells} rating cell(s) could not be read (for example: ${[...stats.samples].map(x=>'"'+x+'"').join(', ')}).`;
+ pending=null;await refresh();tab='csv';start2();$('cm').textContent=msg;
 }
 function renderTeachers(){
  $('view').innerHTML=`<div class="card"><h3>Add teachers and programs</h3>
